@@ -14,10 +14,9 @@ export const eloOfKyu = (kyu) => 525 * Math.exp((30 - kyu) / 23.15);
  * KataGo's human profiles on 13 × 13, measured against each other by scripts/calibrate.mjs and fitted
  * by scripts/fit.mjs (calibration/fit.json): Elo over rank_20k at knots every few ranks, keyed by the
  * profile's rank, and the handicap points one Elo needs, measured in handicap games between profiles.
- * Up to 5 kyu the profiles keep to their names on the OGS scale; above it they spread out, and the
- * 1 dan profile plays about 2–3 dan, so the strong ranks get profiles named a few ranks lower.
+ * On 13 × 13 every profile plays weaker than its name: rank_20k plays like the weakest people on OGS.
  */
-const measuredElo = { 20: 0, 15: 172, 10: 435, 5: 751, 0: 1262 };
+const measuredElo = { 20: 0, 15: 172, 10: 435, 5: 751, 0: 1262, [-2]: 1351 };
 const handicapPerElo = 0.0903;
 const measuredKyus = Object.keys(measuredElo).map(Number).sort((a, b) => b - a);
 const profileName = (kyu) => (kyu < 1 ? `rank_${1 - kyu}d` : `rank_${kyu}k`);
@@ -32,23 +31,24 @@ function profileElo(kyu) {
 }
 
 /**
- * The fixed point of the scale: KataGo's 5 kyu bot is 5 kyu here, where the human model has plenty of
- * games to learn from. Every other rank is placed from it by the OGS scale, so steps are even.
- * This is a choice: these bots were never measured against people.
+ * The fixed point of the scale, measured against people (scripts/move-loss.mjs): rank_20k stands at 29.3 kyu
+ * of OGS. The moves of rank_20k, rank_15k and rank_10k lose as many points by KataGo's judgement as the moves
+ * of OGS players of about 30, 21 and 17 kyu on 13 × 13; this is the place of rank_20k that, with the profiles'
+ * Elo from bot games, puts the three closest to that. Every other rank follows by the OGS scale.
  */
-const anchorKyu = 5;
+const weakestProfileKyu = 29.3;
 /** A profile's rating on the OGS scale. */
-const profileRating = (kyu) => eloOfKyu(anchorKyu) + profileElo(kyu) - profileElo(anchorKyu);
+const profileRating = (kyu) => eloOfKyu(weakestProfileKyu) + profileElo(kyu);
 export const kyuOfElo = (elo) => 30 - 23.15 * Math.log(elo / 525);
-/** The profiles from 20 kyu to 1 dan: ranks stop at 1 dan, and the 1 dan profile is already stronger than that. */
-const profiles = Array.from({ length: 21 }, (_, index) => 20 - index);
+/** The profiles from 20 kyu to 3 dan: ranks stop at 1 dan, which on 13 × 13 takes a profile above rank_1d. */
+const profiles = Array.from({ length: 23 }, (_, index) => 20 - index);
 /** The weakest bot's rank; weaker players get a handicap from it. */
 export const botFloorKyu = Math.round(kyuOfElo(profileRating(profiles[0])));
 /** The strongest rank is 1 dan, or lower if the strongest profile would fall short of it by over half a step. */
 const topKyu = 0;
 export const strongestKyu = (() => {
   const top = profileRating(profiles.at(-1));
-  let kyu = anchorKyu;
+  let kyu = botFloorKyu;
   while (kyu > topKyu && eloOfKyu(kyu - 1) - top <= (eloOfKyu(kyu - 1) - eloOfKyu(kyu)) / 2) kyu--;
   return kyu;
 })();
@@ -76,31 +76,23 @@ export const handicapStones = (count) => (count < 2 ? [] : handicapOrder.slice(0
 
 /**
  * KataGo's lead for black with that many handicap stones, no komi, white to move; 0 is the even game
- * (calibration/stones.json). In bot games two and three stones held up, four gave the weaker bot less than
- * KataGo's lead says (calibration/check-20-12-*.json); the weakest ranks get four and five anyway, as no
- * bot plays weaker than rank_20k and played at 30 kyu it was too strong even with three.
+ * (calibration/stones.json). Two and three stones hold up in bot games; a fourth gave the weaker bot far
+ * less than KataGo's lead says (calibration/check-20-12-*.json), so the handicap uses at most three stones and komi.
  */
-const stoneLead = { 0: 6.4, 2: 19.1, 3: 31.4, 4: 47.1, 5: 57.4 };
-const stoneCounts = [0, 2, 3, 4, 5];
-/**
- * Below the weakest bot the handicap starts at two stones and grows by 5 points a rank, about one stone in
- * two and a half ranks. Not measured: the Elo of the OGS scale gave half as much with no stones at 21 kyu,
- * and played games showed the rank_20k bot is too strong for that at 21 and at 30 kyu.
- */
-const pointsPerRankBelow = 5;
-const firstHandicap = stoneLead[2] - stoneLead[0];
+const stoneLead = { 0: 6.4, 2: 19.1, 3: 31.4 };
+const stoneCounts = [0, 2, 3];
 const halfPoint = (value) => Math.round(value - 0.5) + 0.5;
 /** How far a komi is from the usual 0.5 to 6.5. */
 const unusual = (komi) => Math.max(0, 0.5 - komi, komi - evenKomi);
 
 /**
- * The game for a rank: even with komi 6.5 from the weakest bot up. Below it black gets two stones,
- * and 5 points more for every further rank: the fewest stones that leave the komi closest to the usual 0.5 to 6.5,
- * and komi for the rest, down to reverse komi.
+ * The game for a rank: even with komi 6.5 from the weakest bot up. Below it black gets the rating
+ * the player lacks against that bot in points: the fewest stones that leave the komi closest to the
+ * usual 0.5 to 6.5, and komi for the rest, down to reverse komi.
  */
 export function handicapFor(kyu) {
   if (kyu <= botFloorKyu) return handicapOf(0);
-  return handicapOf(firstHandicap + (kyu - botFloorKyu - 1) * pointsPerRankBelow);
+  return handicapOf((profileRating(profiles[0]) - eloOfKyu(kyu)) * handicapPerElo);
 }
 /** Stones and komi worth `points` for black over the even game. */
 export function handicapOf(points) {
