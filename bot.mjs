@@ -88,35 +88,32 @@ export const handicapStones = (count) => (handicapSets[count] ?? []).map((gtp) =
 
 /**
  * KataGo's lead for black with that many handicap stones, no komi, white to move; 0 is the even game
- * (calibration/stones.json). Two and three stones hold up in bot games; a fourth gave the weaker bot far
- * less than KataGo's lead says (calibration/check-20-12-*.json), so the handicap uses at most three stones and komi.
+ * (calibration/stones.json). Between bots two and three stones hold up; a fourth gave the weaker bot far
+ * less than KataGo's lead says (calibration/check-20-12-*.json), so bot-against-bot checks use at most three.
  */
 const stoneLead = { 0: 6.4, 2: 19.1, 3: 31.4, 4: 47.1, 5: 57.5, 6: 72.1, 7: 81.7, 8: 94.9, 9: 102.4 };
-const stoneCounts = [0, 2, 3];
-/** One more stone is worth about 12 points (from 2 to 9 stones by KataGo's lead); past nine stones, komi gives them. */
+const botStoneCounts = [0, 2, 3];
+/** One more stone is worth about 12 points (from 2 to 9 stones by KataGo's lead). */
 const stonePoints = 12;
 const halfPoint = (value) => Math.round(value - 0.5) + 0.5;
 /** How far a komi is from the usual 0.5 to 6.5. */
 const unusual = (komi) => Math.max(0, 0.5 - komi, komi - evenKomi);
 
 /**
- * The game for a rank: even with komi 6.5 from the weakest bot up. Below it, down to 30 kyu, black gets the
- * rating the player lacks against that bot in points: the fewest stones that leave the komi closest to the
- * usual 0.5 to 6.5, and komi for the rest. Below 30 kyu one more stone a rank.
+ * The game for a rank: even with komi 6.5 from the weakest bot up. Below it the usual handicap ladder, a
+ * stone for every rank: one rank weaker is black with komi 0.5, two ranks two stones, up to nine stones
+ * with komi 0.5. Past nine stones each rank is a stone's worth, 12 points, more komi to black.
  */
 export function handicapFor(kyu) {
-  if (kyu <= botFloorKyu) return handicapOf(0);
-  const atStart = handicapOf((profileRating(profiles[0]) - eloOfKyu(Math.min(kyu, startKyu))) * handicapPerElo);
-  if (kyu <= startKyu) return atStart;
-  // Below 30 kyu every rank is one more stone, up to nine; then 12 points of komi to black for each rank.
-  const wanted = atStart.stones + kyu - startKyu;
-  const stones = Math.min(maxHandicap, wanted);
-  return { stones, komi: atStart.komi - (wanted - stones) * stonePoints };
+  const ranks = kyu - botFloorKyu;
+  if (ranks <= 0) return { stones: 0, komi: evenKomi };
+  const stones = ranks === 1 ? 0 : Math.min(maxHandicap, ranks);
+  return { stones, komi: 0.5 - Math.max(0, ranks - maxHandicap) * stonePoints };
 }
-/** Stones and komi worth `points` for black over the even game. */
+/** Stones and komi worth `points` for black over the even game, as bot-against-bot checks give it. */
 export function handicapOf(points) {
   if (!points) return { stones: 0, komi: evenKomi };
-  const options = stoneCounts.map((stones) => ({ stones, komi: halfPoint(stoneLead[stones] - stoneLead[0] + evenKomi - points) }));
+  const options = botStoneCounts.map((stones) => ({ stones, komi: halfPoint(stoneLead[stones] - stoneLead[0] + evenKomi - points) }));
   return options.reduce((best, option) => (unusual(option.komi) < unusual(best.komi) ? option : best));
 }
 
