@@ -4,7 +4,8 @@ import { isLegal } from './rules.mjs';
 export const boardSize = 13;
 export const evenKomi = 6.5;
 /** Ranks are kept as kyu; 0 and below are dan: 0 is 1 dan, -8 is 9 dan. */
-export const weakestKyu = 30;
+/** Without saved games the rank starts at 30 kyu; losses take it lower without end, under more stones. */
+export const startKyu = 30;
 export const rankText = (kyu) => (kyu >= 1 ? `${kyu} кю` : `${1 - kyu} дан`);
 
 /** The scale of OGS: rating = 525·e^(rank/23.15), where rank 0 is 30 kyu; win odds by Elo. */
@@ -14,7 +15,7 @@ export const eloOfKyu = (kyu) => 525 * Math.exp((30 - kyu) / 23.15);
  * KataGo's human profiles on 13 × 13, measured against each other by scripts/calibrate.mjs and fitted
  * by scripts/fit.mjs (calibration/fit.json): Elo over rank_20k at knots every few ranks, keyed by the
  * profile's rank, and the handicap points one Elo needs, measured in handicap games between profiles.
- * On 13 × 13 every profile plays weaker than its name: rank_20k plays like the weakest people on OGS.
+ * The bots' own scale is the truth here: they were never measured against people.
  */
 const measuredElo = { 20: 0, 15: 172, 10: 435, 5: 751, 0: 1262, [-2]: 1351 };
 const handicapPerElo = 0.0903;
@@ -31,14 +32,12 @@ function profileElo(kyu) {
 }
 
 /**
- * The fixed point of the scale, measured against people (scripts/move-loss.mjs): rank_20k stands at 29.3 kyu
- * of OGS. The moves of rank_20k, rank_15k and rank_10k lose as many points by KataGo's judgement as the moves
- * of OGS players of about 30, 21 and 17 kyu on 13 × 13; this is the place of rank_20k that, with the profiles'
- * Elo from bot games, puts the three closest to that. Every other rank follows by the OGS scale.
+ * The fixed point of the scale, as in nine: KataGo's 5 kyu bot is 5 kyu here, where the human model has
+ * plenty of games to learn from. Every other rank is placed from it by the OGS scale, so steps are even.
  */
-const weakestProfileKyu = 29.3;
+const anchorKyu = 5;
 /** A profile's rating on the OGS scale. */
-const profileRating = (kyu) => eloOfKyu(weakestProfileKyu) + profileElo(kyu);
+const profileRating = (kyu) => eloOfKyu(anchorKyu) + profileElo(kyu) - profileElo(anchorKyu);
 export const kyuOfElo = (elo) => 30 - 23.15 * Math.log(elo / 525);
 /** The profiles from 20 kyu to 3 dan: ranks stop at 1 dan, which on 13 × 13 takes a profile above rank_1d. */
 const profiles = Array.from({ length: 23 }, (_, index) => 20 - index);
@@ -52,8 +51,8 @@ export const strongestKyu = (() => {
   while (kyu > topKyu && eloOfKyu(kyu - 1) - top <= (eloOfKyu(kyu - 1) - eloOfKyu(kyu)) / 2) kyu--;
   return kyu;
 })();
-/** A win takes the rank one step up, a loss one step down. */
-export const nextKyu = (kyu, won) => Math.min(weakestKyu, Math.max(strongestKyu, kyu + (won ? -1 : 1)));
+/** A win takes the rank one step up, a loss one step down; down there is no floor. */
+export const nextKyu = (kyu, won) => Math.max(strongestKyu, kyu + (won ? -1 : 1));
 
 /** The profile whose measured strength is closest to the rank on the OGS scale; the weakest bot below it. */
 export function botFor(kyu) {
@@ -69,30 +68,50 @@ const columns = 'ABCDEFGHJKLMNOPQRST';
 export const gtpOf = (point, size = boardSize) => (point === null ? 'pass' : columns[point % size] + (size - Math.floor(point / size)));
 const pointOf = (gtp, size = boardSize) => (size - Number(gtp.slice(1))) * size + columns.indexOf(gtp[0]);
 
-/** Black's handicap stones on 13 × 13 in the usual order: the two diagonal corners, the others, the center. */
-const handicapOrder = ['K10', 'D4', 'K4', 'D10', 'G7'];
-export const maxHandicap = handicapOrder.length;
-export const handicapStones = (count) => (count < 2 ? [] : handicapOrder.slice(0, count).map((gtp) => pointOf(gtp)));
+/**
+ * Black's handicap stones on 13 × 13 as they are usually set: the corners first, the center on odd counts
+ * from five, the middles of the sides from six.
+ */
+const corners = ['K10', 'D4', 'K4', 'D10'];
+const handicapSets = {
+  2: corners.slice(0, 2),
+  3: corners.slice(0, 3),
+  4: corners,
+  5: [...corners, 'G7'],
+  6: [...corners, 'D7', 'K7'],
+  7: [...corners, 'D7', 'K7', 'G7'],
+  8: [...corners, 'D7', 'K7', 'G10', 'G4'],
+  9: [...corners, 'D7', 'K7', 'G10', 'G4', 'G7'],
+};
+export const maxHandicap = 9;
+export const handicapStones = (count) => (handicapSets[count] ?? []).map((gtp) => pointOf(gtp));
 
 /**
  * KataGo's lead for black with that many handicap stones, no komi, white to move; 0 is the even game
  * (calibration/stones.json). Two and three stones hold up in bot games; a fourth gave the weaker bot far
  * less than KataGo's lead says (calibration/check-20-12-*.json), so the handicap uses at most three stones and komi.
  */
-const stoneLead = { 0: 6.4, 2: 19.1, 3: 31.4 };
+const stoneLead = { 0: 6.4, 2: 19.1, 3: 31.4, 4: 47.1, 5: 57.5, 6: 72.1, 7: 81.7, 8: 94.9, 9: 102.4 };
 const stoneCounts = [0, 2, 3];
+/** One more stone is worth about 12 points (from 2 to 9 stones by KataGo's lead); past nine stones, komi gives them. */
+const stonePoints = 12;
 const halfPoint = (value) => Math.round(value - 0.5) + 0.5;
 /** How far a komi is from the usual 0.5 to 6.5. */
 const unusual = (komi) => Math.max(0, 0.5 - komi, komi - evenKomi);
 
 /**
- * The game for a rank: even with komi 6.5 from the weakest bot up. Below it black gets the rating
- * the player lacks against that bot in points: the fewest stones that leave the komi closest to the
- * usual 0.5 to 6.5, and komi for the rest, down to reverse komi.
+ * The game for a rank: even with komi 6.5 from the weakest bot up. Below it, down to 30 kyu, black gets the
+ * rating the player lacks against that bot in points: the fewest stones that leave the komi closest to the
+ * usual 0.5 to 6.5, and komi for the rest. Below 30 kyu one more stone a rank.
  */
 export function handicapFor(kyu) {
   if (kyu <= botFloorKyu) return handicapOf(0);
-  return handicapOf((profileRating(profiles[0]) - eloOfKyu(kyu)) * handicapPerElo);
+  const atStart = handicapOf((profileRating(profiles[0]) - eloOfKyu(Math.min(kyu, startKyu))) * handicapPerElo);
+  if (kyu <= startKyu) return atStart;
+  // Below 30 kyu every rank is one more stone, up to nine; then 12 points of komi to black for each rank.
+  const wanted = atStart.stones + kyu - startKyu;
+  const stones = Math.min(maxHandicap, wanted);
+  return { stones, komi: atStart.komi - (wanted - stones) * stonePoints };
 }
 /** Stones and komi worth `points` for black over the even game. */
 export function handicapOf(points) {

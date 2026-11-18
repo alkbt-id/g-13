@@ -1,6 +1,6 @@
 /** One screen: the board, your rank, a game with a bot of that rank, then the result and territory. */
 import { play, replay, startPosition, isLegal } from './rules.mjs';
-import { boardSize, botFloorKyu, botFor, chooseBotMove, evenKomi, finalOwnership, gtpOf, handicapFor, handicapStones, nextKyu, rankText, strongestKyu, weakestKyu } from './bot.mjs';
+import { boardSize, botFloorKyu, botFor, chooseBotMove, evenKomi, finalOwnership, gtpOf, handicapFor, handicapStones, nextKyu, rankText, startKyu, strongestKyu } from './bot.mjs';
 import { countGame } from './score.mjs';
 import { createBackend } from './backend.mjs';
 import { playStone, wakeSound } from './sound.mjs';
@@ -13,8 +13,8 @@ const botPause = 400;
 const backend = createBackend();
 const { engine } = backend;
 const root = document.getElementById('app');
-// With no saved games the rank starts at the weakest.
-const firstState = () => ({ version: 1, kyu: weakestKyu, game: null, history: [] });
+// With no saved games the rank starts at 30 kyu.
+const firstState = () => ({ version: 1, kyu: startKyu, game: null, history: [] });
 let state = firstState();
 /** What runs now: 'bot' while the bot picks a move, 'count' while KataGo counts the end. */
 let busy = '';
@@ -31,7 +31,7 @@ let resignAsked = false;
 
 function validState(value) {
   if (!value || typeof value !== 'object' || value.version !== 1) return null;
-  if (!Number.isInteger(value.kyu) || value.kyu > weakestKyu || value.kyu < strongestKyu) return null;
+  if (!Number.isInteger(value.kyu) || value.kyu < strongestKyu) return null;
   const { game } = value;
   if (game !== null) {
     if (typeof game !== 'object' || ![1, 2].includes(game.color) || !Array.isArray(game.moves)) return null;
