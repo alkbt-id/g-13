@@ -83,22 +83,24 @@ export const handicapStones = (count) => (count < 2 ? [] : handicapOrder.slice(0
 const stoneLead = { 0: 6.4, 2: 19.1, 3: 31.4, 4: 47.1, 5: 57.4 };
 const stoneCounts = [0, 2, 3, 4, 5];
 /**
- * Below the weakest bot every rank is worth 5 points of handicap, about one stone in two and a half ranks.
- * Not measured: the Elo of the OGS scale gave half as much, and a game at 30 kyu showed it was too little.
+ * Below the weakest bot the handicap starts at two stones and grows by 5 points a rank, about one stone in
+ * two and a half ranks. Not measured: the Elo of the OGS scale gave half as much with no stones at 21 kyu,
+ * and played games showed the rank_20k bot is too strong for that at 21 and at 30 kyu.
  */
 const pointsPerRankBelow = 5;
+const firstHandicap = stoneLead[2] - stoneLead[0];
 const halfPoint = (value) => Math.round(value - 0.5) + 0.5;
 /** How far a komi is from the usual 0.5 to 6.5. */
 const unusual = (komi) => Math.max(0, 0.5 - komi, komi - evenKomi);
 
 /**
- * The game for a rank: even with komi 6.5 from the weakest bot up. Below it black gets 5 points for
- * every rank under that bot: the fewest stones that leave the komi closest to the usual 0.5 to 6.5,
+ * The game for a rank: even with komi 6.5 from the weakest bot up. Below it black gets two stones,
+ * and 5 points more for every further rank: the fewest stones that leave the komi closest to the usual 0.5 to 6.5,
  * and komi for the rest, down to reverse komi.
  */
 export function handicapFor(kyu) {
   if (kyu <= botFloorKyu) return handicapOf(0);
-  return handicapOf((kyu - botFloorKyu) * pointsPerRankBelow);
+  return handicapOf(firstHandicap + (kyu - botFloorKyu - 1) * pointsPerRankBelow);
 }
 /** Stones and komi worth `points` for black over the even game. */
 export function handicapOf(points) {
